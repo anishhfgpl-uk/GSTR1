@@ -1,0 +1,14 @@
+export interface GstState { code: string; name: string; }
+export type VoucherType = 'Sales' | 'Credit Note' | 'Debit Note' | 'Export';
+export interface TallyItemEntry { id:string; itemName:string; hsnCode:string; quantity:number; unit:string; rate:number; taxableAmount:number; gstRate:number; igstAmount:number; cgstAmount:number; sgstAmount:number; cessAmount?:number; }
+export interface TallyVoucher { id:string; voucherType:VoucherType; voucherNo:string; date:string; partyName:string; partyGstin?:string; pos:string; posName?:string; isReverseCharge:boolean; invoiceType:'Regular'|'Deemed Export'|'SEZ with payment'|'SEZ without payment'; totalValue:number; taxableValue:number; igst:number; cgst:number; sgst:number; cess:number; items:TallyItemEntry[]; originalInvoiceNo?:string; originalInvoiceDate?:string; hasGstinError?:boolean; hasTaxMismatch?:boolean; validationMessages?:string[]; }
+export interface BusinessConfig { supplierGstin:string; tradeName:string; legalName:string; financialYear:string; returnPeriod:string; stateCode:string; grossTurnoverPreviousYear:number; }
+export interface Gstr1B2BInvoice { inum:string; idt:string; val:number; pos:string; rchrg:'Y'|'N'; inv_typ:'R'|'DE'|'SEWP'|'SEWOP'; itms:{num:number;itm_det:{rt:number;txval:number;iamt:number;camt:number;samt:number;csamt:number}}[]; }
+export interface Gstr1B2BGroup { ctin:string; partyName:string; inv:Gstr1B2BInvoice[]; }
+export interface Gstr1B2CLGroup { pos:string; inv:{inum:string;idt:string;val:number;etin?:string;itms:{num:number;itm_det:{rt:number;txval:number;iamt:number;csamt:number}}[]}[]; }
+export interface Gstr1B2CSItem { sply_ty:'INTER'|'INTRA'; pos:string; rt:number; txval:number; iamt:number; camt:number; samt:number; csamt:number; }
+export interface Gstr1CDNRItem { ctin:string; partyName?:string; nt:{ntty:'C'|'D';nt_num:string;nt_dt:string;p_gst:'N'|'Y';inum:string;idt:string;val:number;itms:{num:number;itm_det:{rt:number;txval:number;iamt:number;camt:number;samt:number;csamt:number}}[]}[]; }
+export interface Gstr1CDNURItem { typ:'B2CL'|'EXP'; ntty:'C'|'D'; nt_num:string; nt_dt:string; p_gst:'N'|'Y'; inum:string; idt:string; val:number; pos:string; itms:{num:number;itm_det:{rt:number;txval:number;iamt:number;csamt:number}}[]; }
+export interface Gstr1HSNItem { num:number; hsn_sc:string; desc:string; uqc:string; qty:number; val:number; txval:number; iamt:number; camt:number; samt:number; csamt:number; }
+export interface Gstr1DocDetItem { doc_num:number; doc_typ:string; docs:{num:number;from:string;to:string;totnum:number;canc:number;net_issue:number}[]; }
+export interface Gstr1JsonSchema { gstin:string; fp:string; gt:number; cur_gt:number; version:string; hash:string; b2b?:Gstr1B2BGroup[]; b2cl?:Gstr1B2CLGroup[]; b2cs?:Gstr1B2CSItem[]; cdnr?:Gstr1CDNRItem[]; cdnur?:Gstr1CDNURItem[]; exp?:any[]; hsn?:{data:Gstr1HSNItem[]}; doc_issue?:{doc_det:Gstr1DocDetItem[]}; }
