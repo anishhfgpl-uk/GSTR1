@@ -58,15 +58,15 @@ app.post(['/api/tally/sales', '/gstr1/api/tally/sales'], tallySales);
 const distPath = path.join(__dirname, 'dist');
 const indexPath = path.join(distPath, 'index.html');
 
-// Keep the GSTR1 browser app explicitly mounted at /gstr1.
-app.get('/gstr1', (_req, res) => res.redirect(301, '/gstr1/'));
-app.get('/gstr1/', (_req, res) => res.sendFile(indexPath));
+// Serve the GSTR1 browser app at both /gstr1 and /gstr1/ without redirects.
+// This avoids redirect loops when Cloudflare proxies the /gstr1 path.
+app.get(['/gstr1', '/gstr1/'], (_req, res) => res.sendFile(indexPath));
 app.get('/gstr1/*', (_req, res) => res.sendFile(indexPath));
 
-// Serve the built assets. Vite is configured with base=/gstr1/.
+// Serve Vite-built assets. Vite is configured with base=/gstr1/.
 app.use(express.static(distPath));
 
-// Keep the existing health/API routes working even when accessed without /gstr1.
+// Keep the root fallback for direct Render access.
 app.get('*', (_req, res) => res.sendFile(indexPath));
 
 app.listen(PORT, '0.0.0.0', () => {
