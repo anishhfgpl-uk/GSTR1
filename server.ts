@@ -59,14 +59,16 @@ app.post(['/api/tally/sales', '/gstr1/api/tally/sales'], tallySales);
 const distPath = __dirname;
 const indexPath = path.join(distPath, 'index.html');
 
-// Serve the GSTR1 browser app at both /gstr1 and /gstr1/ without redirects.
+// IMPORTANT: Vite builds asset URLs under /gstr1/. Mount the dist directory at
+// /gstr1 so requests such as /gstr1/assets/index-*.js resolve to dist/assets/*.js.
+app.use('/gstr1', express.static(distPath, { index: false }));
+
+// Serve the SPA shell at /gstr1 and /gstr1/ without redirects.
 app.get(['/gstr1', '/gstr1/'], (_req, res) => res.sendFile(indexPath));
 app.get('/gstr1/*', (_req, res) => res.sendFile(indexPath));
 
-// Serve Vite-built assets. Vite is configured with base=/gstr1/.
-app.use(express.static(distPath));
-
-// Keep the root fallback for direct Render access.
+// Also serve the built files directly for the Render URL/root fallback.
+app.use(express.static(distPath, { index: false }));
 app.get('*', (_req, res) => res.sendFile(indexPath));
 
 app.listen(PORT, '0.0.0.0', () => {
