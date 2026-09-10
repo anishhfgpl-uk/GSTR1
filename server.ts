@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
-const PORT = Number(process.env.PORT || 3000);
+const PORT = Number(process.env.PORT || 3100);
 const TALLY_URL = process.env.TALLY_URL || 'http://127.0.0.1:9000';
 
 app.use(express.json({ limit: '2mb' }));
@@ -28,11 +28,7 @@ const TALLY_EXPORT_TDL_XML = `
   </BODY>
 </ENVELOPE>`.trim();
 
-app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'gstr1', tallyUrl: TALLY_URL });
-});
-
-app.post('/api/tally/sales', async (_req, res) => {
+const tallySales = async (_req: express.Request, res: express.Response) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
   try {
@@ -51,13 +47,25 @@ app.post('/api/tally/sales', async (_req, res) => {
   } finally {
     clearTimeout(timeout);
   }
+};
+
+app.get(['/api/health', '/gstr1/api/health'], (_req, res) => {
+  res.json({ status: 'ok', service: 'gstr1', tallyUrl: TALLY_URL });
 });
 
+app.post(['/api/tally/sales', '/gstr1/api/tally/sales'], tallySales);
+
 const distPath = path.join(__dirname, 'dist');
+app.use('/gstr1', (req, _res, next) => {
+  req.url = req.url.replace(/^\/gstr1(?=\/|$)/, '') || '/';
+  next();
+}, express.static(distPath));
 app.use(express.static(distPath));
+app.get('/gstr1/*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
 app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`GSTR-1 server running on http://0.0.0.0:${PORT}`);
+  console.log(`GSTR-1 public path: /gstr1/`);
   console.log(`Tally source: ${TALLY_URL}`);
 });
