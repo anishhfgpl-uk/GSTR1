@@ -55,11 +55,11 @@ app.get(['/api/health', '/gstr1/api/health'], (_req, res) => {
 
 app.post(['/api/tally/sales', '/gstr1/api/tally/sales'], tallySales);
 
-const distPath = path.join(__dirname, 'dist');
+// Render runs the bundled server from /dist/server.mjs, so __dirname already points to /dist.
+const distPath = __dirname;
 const indexPath = path.join(distPath, 'index.html');
 
 // Serve the GSTR1 browser app at both /gstr1 and /gstr1/ without redirects.
-// This avoids redirect loops when Cloudflare proxies the /gstr1 path.
 app.get(['/gstr1', '/gstr1/'], (_req, res) => res.sendFile(indexPath));
 app.get('/gstr1/*', (_req, res) => res.sendFile(indexPath));
 
