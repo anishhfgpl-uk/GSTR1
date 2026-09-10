@@ -56,13 +56,18 @@ app.get(['/api/health', '/gstr1/api/health'], (_req, res) => {
 app.post(['/api/tally/sales', '/gstr1/api/tally/sales'], tallySales);
 
 const distPath = path.join(__dirname, 'dist');
-app.use('/gstr1', (req, _res, next) => {
-  req.url = req.url.replace(/^\/gstr1(?=\/|$)/, '') || '/';
-  next();
-}, express.static(distPath));
+const indexPath = path.join(distPath, 'index.html');
+
+// Keep the GSTR1 browser app explicitly mounted at /gstr1.
+app.get('/gstr1', (_req, res) => res.redirect(301, '/gstr1/'));
+app.get('/gstr1/', (_req, res) => res.sendFile(indexPath));
+app.get('/gstr1/*', (_req, res) => res.sendFile(indexPath));
+
+// Serve the built assets. Vite is configured with base=/gstr1/.
 app.use(express.static(distPath));
-app.get('/gstr1/*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
-app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
+
+// Keep the existing health/API routes working even when accessed without /gstr1.
+app.get('*', (_req, res) => res.sendFile(indexPath));
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`GSTR-1 server running on http://0.0.0.0:${PORT}`);
