@@ -7,6 +7,8 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT || 3100);
 const TALLY_URL = process.env.TALLY_URL || 'http://127.0.0.1:9000';
+const TALLY_BRIDGE_URL = String(process.env.TALLY_BRIDGE_URL || '').replace(/\/$/, '');
+const TALLY_BRIDGE_TOKEN = process.env.TALLY_BRIDGE_TOKEN || '';
 
 app.use(express.json({ limit: '2mb' }));
 
@@ -30,49 +32,46 @@ const TALLY_EXPORT_TDL_XML = `
 
 const tallySales = async (_req: express.Request, res: express.Response) => {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  const target = TALLY_BRIDGE_URL ? `${TALLY_BRIDGE_URL}/tally` : TALLY_URL;
   try {
-    const response = await fetch(TALLY_URL, {
+    const response = await fetch(target, {
       method: 'POST',
-      headers: { 'Content-Type': 'text/xml;charset=utf-8' },
+      headers: {
+        'Content-Type': 'text/xml;charset=utf-8',
+        ...(TALLY_BRIDGE_TOKEN ? { 'X-GSTR1-Bridge-Token': TALLY_BRIDGE_TOKEN } : {}),
+      },
       body: TALLY_EXPORT_TDL_XML,
       signal: controller.signal,
     });
     const xml = await response.text();
-    if (!response.ok) return res.status(502).json({ ok: false, message: `Tally HTTP ${response.status}`, xml });
+    if (!response.ok) return res.status(502).json({ ok: false, message: `Tally/bridge HTTP ${response.status}`, xml });
     if (!xml.includes('<VOUCHER')) return res.status(502).json({ ok: false, message: 'Tally connected, but no VOUCHER data was returned.', xml });
     return res.json({ ok: true, xml });
   } catch (error: any) {
-    return res.status(502).json({ ok: false, message: `Cannot connect to Tally at ${TALLY_URL}: ${error?.message || 'connection failed'}` });
+    return res.status(502).json({ ok: false, message: `Cannot connect to Tally through ${target}: ${error?.message || 'connection failed'}` });
   } finally {
     clearTimeout(timeout);
   }
 };
 
 app.get(['/api/health', '/gstr1/api/health'], (_req, res) => {
-  res.json({ status: 'ok', service: 'gstr1', tallyUrl: TALLY_URL });
+  res.json({ status: 'ok', service: 'gstr1', tallyBridge: Boolean(TALLY_BRIDGE_URL) });
 });
 
 app.post(['/api/tally/sales', '/gstr1/api/tally/sales'], tallySales);
 
-// Render runs the bundled server from /dist/server.mjs, so __dirname already points to /dist.
 const distPath = __dirname;
 const indexPath = path.join(distPath, 'index.html');
 
-// IMPORTANT: Vite builds asset URLs under /gstr1/. Mount the dist directory at
-// /gstr1 so requests such as /gstr1/assets/index-*.js resolve to dist/assets/*.js.
 app.use('/gstr1', express.static(distPath, { index: false }));
-
-// Serve the SPA shell at /gstr1 and /gstr1/ without redirects.
 app.get(['/gstr1', '/gstr1/'], (_req, res) => res.sendFile(indexPath));
 app.get('/gstr1/*', (_req, res) => res.sendFile(indexPath));
-
-// Also serve the built files directly for the Render URL/root fallback.
 app.use(express.static(distPath, { index: false }));
 app.get('*', (_req, res) => res.sendFile(indexPath));
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`GSTR-1 server running on http://0.0.0.0:${PORT}`);
   console.log(`GSTR-1 public path: /gstr1/`);
-  console.log(`Tally source: ${TALLY_URL}`);
+  console.log(`Tally bridge: ${TALLY_BRIDGE_URL || 'direct local Tally URL'}`);
 });
