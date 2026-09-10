@@ -23,14 +23,8 @@ import { HelpGuideModal } from './components/HelpGuideModal';
 import { extractStateCodeFromGstin } from './utils/gstinValidator';
 
 export default function App() {
-  const [config, setConfig] = useState<BusinessConfig>(() => {
-    try { return JSON.parse(localStorage.getItem('gstr1_business_config') || 'null') || DEFAULT_BUSINESS_CONFIG; }
-    catch { return DEFAULT_BUSINESS_CONFIG; }
-  });
-  const [vouchers, setVouchers] = useState<TallyVoucher[]>(() => {
-    try { return JSON.parse(localStorage.getItem('gstr1_vouchers') || 'null') || SAMPLE_TALLY_VOUCHERS; }
-    catch { return SAMPLE_TALLY_VOUCHERS; }
-  });
+  const [config, setConfig] = useState<BusinessConfig>(() => { try { return JSON.parse(localStorage.getItem('gstr1_business_config') || 'null') || DEFAULT_BUSINESS_CONFIG; } catch { return DEFAULT_BUSINESS_CONFIG; } });
+  const [vouchers, setVouchers] = useState<TallyVoucher[]>(() => { try { return JSON.parse(localStorage.getItem('gstr1_vouchers') || 'null') || SAMPLE_TALLY_VOUCHERS; } catch { return SAMPLE_TALLY_VOUCHERS; } });
   const [activeTab, setActiveTab] = useState<TabId>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -40,7 +34,7 @@ export default function App() {
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [voucherToEdit, setVoucherToEdit] = useState<TallyVoucher | null>(null);
   const [isSyncingTally, setIsSyncingTally] = useState(false);
-  const [syncNotice, setSyncNotice] = useState<string | null>('GSTR-1 ready. Tally data is stored locally in this browser.');
+  const [syncNotice, setSyncNotice] = useState<string | null>('Tally se live data connect ho raha hai...');
 
   useEffect(() => { localStorage.setItem('gstr1_business_config', JSON.stringify(config)); }, [config]);
   useEffect(() => { localStorage.setItem('gstr1_vouchers', JSON.stringify(vouchers)); }, [vouchers]);
@@ -50,23 +44,16 @@ export default function App() {
     if (!q) return vouchers;
     return vouchers.filter(v => v.voucherNo.toLowerCase().includes(q) || v.partyName.toLowerCase().includes(q) || (v.partyGstin || '').toLowerCase().includes(q) || (v.posName || '').toLowerCase().includes(q) || v.items.some(it => it.itemName.toLowerCase().includes(q) || it.hsnCode.toLowerCase().includes(q)));
   }, [vouchers, searchTerm]);
-
-  // IMPORTANT: reporting/export always uses the complete voucher set. Search is UI-only.
   const gstr1Data = useMemo(() => generateGstr1(vouchers, config), [vouchers, config]);
 
   const handleImportVouchers = (imported: TallyVoucher[], detectedCompany?: { name?: string; gstin?: string }) => {
     setVouchers(imported);
-    if (detectedCompany) setConfig(prev => {
-      const next = { ...prev };
-      if (detectedCompany.name) next.tradeName = detectedCompany.name;
-      if (detectedCompany.gstin) { next.supplierGstin = detectedCompany.gstin; const state = extractStateCodeFromGstin(detectedCompany.gstin); if (state) next.stateCode = state; }
-      return next;
-    });
+    if (detectedCompany) setConfig(prev => ({ ...prev, ...(detectedCompany.name ? { tradeName: detectedCompany.name } : {}), ...(detectedCompany.gstin ? { supplierGstin: detectedCompany.gstin, stateCode: extractStateCodeFromGstin(detectedCompany.gstin) || prev.stateCode } : {}) }));
   };
 
   const handleAutoSyncTally = async () => {
     setIsSyncingTally(true);
-    setSyncNotice('Connecting to Tally Prime...');
+    setSyncNotice('Tally Prime se live Sales data pick ho raha hai...');
     try {
       const result = await autoFetchFromTally('http://localhost:9000', config.stateCode);
       if (result.result?.vouchers.length) {
@@ -74,30 +61,19 @@ export default function App() {
         if (result.result.companyName || result.result.companyGstin) setConfig(prev => ({ ...prev, ...(result.result?.companyName ? { tradeName: result.result.companyName } : {}), ...(result.result?.companyGstin ? { supplierGstin: result.result.companyGstin, stateCode: extractStateCodeFromGstin(result.result.companyGstin) || prev.stateCode } : {}) }));
       }
       setSyncNotice(result.message);
-    } catch { setSyncNotice('Tally से कनेक्शन नहीं हो पाया। Tally Prime चालू है और port 9000 उपलब्ध है या नहीं, जाँच करें।'); }
+    } catch (e: any) { setSyncNotice(`Tally connection failed: ${e?.message || 'Port 9000 check karein.'}`); }
     finally { setIsSyncingTally(false); }
   };
+
+  useEffect(() => { handleAutoSyncTally(); }, []);
 
   const handleSaveVoucher = (saved: TallyVoucher) => setVouchers(prev => { const i = prev.findIndex(v => v.id === saved.id); if (i >= 0) { const copy = [...prev]; copy[i] = saved; return copy; } return [saved, ...prev]; });
   const handleDeleteVoucher = (id: string) => { if (window.confirm('Delete this voucher?')) setVouchers(prev => prev.filter(v => v.id !== id)); };
   const handleOpenEdit = (v: TallyVoucher) => { setVoucherToEdit(v); setIsEditModalOpen(true); };
   const handleOpenAdd = () => { setVoucherToEdit(null); setIsEditModalOpen(true); };
-
-  const handleFixTaxHead = (id: string) => setVouchers(prev => prev.map(v => {
-    if (v.id !== id) return v;
-    const inter = v.pos !== config.stateCode;
-    const items = v.items.map(it => {
-      const tax = it.taxableAmount * it.gstRate / 100;
-      return { ...it, igstAmount: inter ? tax : 0, cgstAmount: inter ? 0 : tax / 2, sgstAmount: inter ? 0 : tax / 2 };
-    });
-    return { ...v, items, igst: items.reduce((a,b)=>a+b.igstAmount,0), cgst: items.reduce((a,b)=>a+b.cgstAmount,0), sgst: items.reduce((a,b)=>a+b.sgstAmount,0), hasTaxMismatch: false, validationMessages: (v.validationMessages || []).filter(m => !m.includes('Inter-state') && !m.includes('Intra-state')) };
-  }));
+  const handleFixTaxHead = (id: string) => setVouchers(prev => prev.map(v => { if (v.id !== id) return v; const inter = v.pos !== config.stateCode; const items = v.items.map(it => { const tax = it.taxableAmount * it.gstRate / 100; return { ...it, igstAmount: inter ? tax : 0, cgstAmount: inter ? 0 : tax / 2, sgstAmount: inter ? 0 : tax / 2 }; }); return { ...v, items, igst: items.reduce((a,b)=>a+b.igstAmount,0), cgst: items.reduce((a,b)=>a+b.cgstAmount,0), sgst: items.reduce((a,b)=>a+b.sgstAmount,0), hasTaxMismatch: false, validationMessages: (v.validationMessages || []).filter(m => !m.includes('Inter-state') && !m.includes('Intra-state')) }; }));
   const handleFixAllTaxHeads = () => setVouchers(prev => prev.map(v => { if (!v.hasTaxMismatch) return v; const inter=v.pos!==config.stateCode; const items=v.items.map(it=>{const tax=it.taxableAmount*it.gstRate/100;return {...it,igstAmount:inter?tax:0,cgstAmount:inter?0:tax/2,sgstAmount:inter?0:tax/2};}); return {...v,items,igst:items.reduce((a,b)=>a+b.igstAmount,0),cgst:items.reduce((a,b)=>a+b.cgstAmount,0),sgst:items.reduce((a,b)=>a+b.sgstAmount,0),hasTaxMismatch:false}; }));
-
-  const handleDownloadJson = () => {
-    const blob = new Blob([JSON.stringify(gstr1Data.gstr1Json, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`GSTR1_${config.supplierGstin}_${config.returnPeriod}.json`; a.click(); URL.revokeObjectURL(url);
-  };
+  const handleDownloadJson = () => { const blob = new Blob([JSON.stringify(gstr1Data.gstr1Json, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`GSTR1_${config.supplierGstin}_${config.returnPeriod}.json`; a.click(); URL.revokeObjectURL(url); };
   const handleResetSampleData = () => { setVouchers(SAMPLE_TALLY_VOUCHERS); setConfig(DEFAULT_BUSINESS_CONFIG); };
   const handleClearAllVouchers = () => { if (window.confirm('Are you sure you want to clear all vouchers?')) setVouchers([]); };
 
