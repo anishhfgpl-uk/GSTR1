@@ -1,15 +1,26 @@
 import { TallyVoucher, TallyItemEntry } from '../types/gst';
 
+export interface TallyCompanyProfile {
+  name?: string;
+  gstin?: string;
+  stateName?: string;
+  address?: string;
+  phone?: string;
+  email?: string;
+  pincode?: string;
+}
+
 export interface TallyXmlParseResult {
   vouchers: TallyVoucher[];
   companyName?: string;
   companyGstin?: string;
+  companyProfile?: TallyCompanyProfile;
   errors: string[];
 }
 
 const text = (xml: string, tag: string) => {
   const m = xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'i'));
-  return m ? m[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim() : '';
+  return m ? xmlUnescape(m[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim()) : '';
 };
 
 const num = (value: string) => {
@@ -40,7 +51,7 @@ function voucherBlocks(xml: string) {
 function parseItems(vxml: string, voucherId: string): TallyItemEntry[] {
   const blocks = [...vxml.matchAll(/<ALLINVENTORYENTRIES\.LIST\b[^>]*>[\s\S]*?<\/ALLINVENTORYENTRIES\.LIST>/gi)].map(m => m[0]);
   return blocks.map((b, i) => {
-    const itemName = xmlUnescape(text(b, 'STOCKITEMNAME') || text(b, 'STOCKITEM') || text(b, 'ITEMNAME') || `Item ${i + 1}`);
+    const itemName = text(b, 'STOCKITEMNAME') || text(b, 'STOCKITEM') || text(b, 'ITEMNAME') || `Item ${i + 1}`;
     const quantityRaw = text(b, 'ACTUALQTY') || text(b, 'BILLEDQTY');
     const rateRaw = text(b, 'RATE');
     const amountRaw = text(b, 'AMOUNT');
@@ -57,21 +68,38 @@ function parseItems(vxml: string, voucherId: string): TallyItemEntry[] {
   });
 }
 
+export function parseTallyCompanyXml(xml: string): TallyCompanyProfile {
+  const name = text(xml, 'COMPANYNAME') || text(xml, 'COMPANYNAME1') || text(xml, 'COMPANYNAMEVALUE') || text(xml, 'COMPANYNAME');
+  const gstin = (text(xml, 'GSTIN') || text(xml, 'GSTREGISTRATIONNUMBER') || text(xml, 'GSTREGNUMBER')).toUpperCase();
+  const state = text(xml, 'STATENAME') || text(xml, 'STATE');
+  const addresses = [text(xml, 'ADDRESS1'), text(xml, 'ADDRESS2'), text(xml, 'ADDRESS3')].filter(Boolean);
+  const address = addresses.join(', ') || text(xml, 'ADDRESS');
+  return {
+    name: name || undefined,
+    gstin: gstin || undefined,
+    stateName: state || undefined,
+    address: address || undefined,
+    phone: text(xml, 'PHONE') || text(xml, 'PHONENUMBER') || undefined,
+    email: text(xml, 'EMAIL') || undefined,
+    pincode: text(xml, 'PINCODE') || text(xml, 'PIN') || undefined,
+  };
+}
+
 export function parseTallyXml(xml: string, supplierStateCode = '27'): TallyXmlParseResult {
   const errors: string[] = [];
   const blocks = voucherBlocks(xml);
-  const companyGstin = (text(xml, 'GSTREGISTRATIONNUMBER') || text(xml, 'PARTYGSTIN') || '').toUpperCase();
-  const companyName = xmlUnescape(text(xml, 'STATENAME') ? (text(xml, 'COMPANYNAME') || text(xml, 'CMPNAME')) : (text(xml, 'COMPANYNAME') || text(xml, 'CMPNAME')));
+  const companyGstin = (text(xml, 'GSTREGISTRATIONNUMBER') || text(xml, 'GSTREGNUMBER') || text(xml, 'PARTYGSTIN') || '').toUpperCase();
+  const companyName = text(xml, 'COMPANYNAME') || text(xml, 'CMPNAME');
   const vouchers: TallyVoucher[] = [];
 
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i];
-    const voucherTypeRaw = xmlUnescape(text(b, 'VOUCHERTYPENAME') || 'Sales');
+    const voucherTypeRaw = text(b, 'VOUCHERTYPENAME') || 'Sales';
     const voucherType: TallyVoucher['voucherType'] = /credit/i.test(voucherTypeRaw) ? 'Credit Note' : /debit/i.test(voucherTypeRaw) ? 'Debit Note' : /export/i.test(voucherTypeRaw) ? 'Export' : 'Sales';
     const id = text(b, 'MASTERID') || text(b, 'ALTERID') || `${i + 1}`;
-    const voucherNo = xmlUnescape(text(b, 'VOUCHERNUMBER') || text(b, 'REFERENCE') || `TALLY-${i + 1}`);
+    const voucherNo = text(b, 'VOUCHERNUMBER') || text(b, 'REFERENCE') || `TALLY-${i + 1}`;
     const date = dateToIso(text(b, 'DATE'));
-    const partyName = xmlUnescape(text(b, 'PARTYNAME') || text(b, 'PARTYLEDGERNAME') || text(b, 'LEDGERNAME') || 'Unknown Party');
+    const partyName = text(b, 'PARTYNAME') || text(b, 'PARTYLEDGERNAME') || text(b, 'LEDGERNAME') || 'Unknown Party';
     const partyGstin = (text(b, 'PARTYGSTIN') || text(b, 'GSTIN') || '').toUpperCase();
     const pos = (partyGstin.slice(0, 2) || text(b, 'PLACEOFSUPPLY').slice(0, 2) || supplierStateCode).padStart(2, '0');
     const totalValue = Math.abs(num(text(b, 'VOUCHERTOTAL') || text(b, 'TOTALVALUE') || text(b, 'AMOUNT')));
