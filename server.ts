@@ -12,7 +12,26 @@ const TALLY_BRIDGE_TOKEN = process.env.TALLY_BRIDGE_TOKEN || '';
 
 app.use(express.json({ limit: '2mb' }));
 
-const TALLY_SALES_XML = `
+function monthRange(returnPeriod = '') {
+  const m = /^(\d{2})(\d{4})$/.exec(String(returnPeriod));
+  if (!m) return undefined;
+  const month = Number(m[1]);
+  const year = Number(m[2]);
+  if (month < 1 || month > 12 || year < 2000 || year > 2100) return undefined;
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return {
+    from: `${year}${pad(month)}01`,
+    to: `${year}${pad(month)}${pad(lastDay)}`,
+  };
+}
+
+function buildSalesXml(returnPeriod = '') {
+  const range = monthRange(returnPeriod);
+  const dates = range
+    ? `\n        <SVFROMDATE>${range.from}</SVFROMDATE>\n        <SVTODATE>${range.to}</SVTODATE>`
+    : '';
+  return `
 <ENVELOPE>
   <HEADER>
     <VERSION>1</VERSION>
@@ -23,16 +42,16 @@ const TALLY_SALES_XML = `
   <BODY>
     <DESC>
       <STATICVARIABLES>
-        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>${dates}
         <VOUCHERTYPENAME TYPE="String">Sales</VOUCHERTYPENAME>
       </STATICVARIABLES>
     </DESC>
   </BODY>
 </ENVELOPE>`.trim();
+}
 
 // This uses Tally's current-company context directly. GSTIN is exposed by
-// Tally's CMPGSTaxNumber formula; address/state/phone/email come from the
-// Company object for ##SVCurrentCompany.
+// Tally's CMPGSTaxNumber formula; address/state/phone/email come from the Company object for ##SVCurrentCompany.
 const TALLY_COMPANY_XML = `
 <ENVELOPE>
   <HEADER>
@@ -79,7 +98,7 @@ const TALLY_COMPANY_XML = `
 
 async function postToTally(xml: string) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20000);
+  const timeout = setTimeout(() => controller.abort(), 60000);
   const target = TALLY_BRIDGE_URL ? `${TALLY_BRIDGE_URL}/tally` : TALLY_URL;
   try {
     const response = await fetch(target, {
@@ -99,9 +118,10 @@ async function postToTally(xml: string) {
   }
 }
 
-const tallySales = async (_req: express.Request, res: express.Response) => {
+const tallySales = async (req: express.Request, res: express.Response) => {
   try {
-    const { text: xml } = await postToTally(TALLY_SALES_XML);
+    const returnPeriod = String(req.body?.returnPeriod || '');
+    const { text: xml } = await postToTally(buildSalesXml(returnPeriod));
     if (!/<VOUCHER\b/i.test(xml)) return res.status(502).json({ ok: false, message: 'Tally connected, but no Sales VOUCHER data was returned.', xml });
     return res.json({ ok: true, xml });
   } catch (error: any) {
