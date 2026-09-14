@@ -10,7 +10,7 @@ export interface TallyConnectionStatus {
 
 async function postJson(path: string, body: unknown = {}) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 25000);
+  const timeoutId = setTimeout(() => controller.abort(), 70000);
   try {
     const response = await fetch(path, {
       method: 'POST',
@@ -36,15 +36,14 @@ export async function fetchTallyCompany(): Promise<TallyCompanyProfile> {
 export async function autoFetchFromTally(
   _tallyHost: string = 'http://localhost:9000',
   supplierStateCode: string = '27',
+  returnPeriod: string = '',
 ): Promise<TallyConnectionStatus> {
   try {
-    // Both calls go through the GSTR1 server proxy. The proxy/bridge talks to
-    // 127.0.0.1:9000, so the data comes from the TallyPrime instance currently
-    // running on the user's PC rather than from sample/uploaded data.
-    const [company, salesPayload] = await Promise.all([
-      fetchTallyCompany().catch(() => undefined),
-      postJson('/api/tally/sales', { supplierStateCode }),
-    ]);
+    // IMPORTANT: do not hit Tally with company and Sales exports at the same
+    // time. TallyPrime can become unresponsive when two XML exports run in
+    // parallel, especially on Education/limited editions.
+    const company = await fetchTallyCompany().catch(() => undefined);
+    const salesPayload = await postJson('/api/tally/sales', { supplierStateCode, returnPeriod });
     const xmlText = String(salesPayload?.xml || '');
     if (!/<VOUCHER\b/i.test(xmlText)) throw new Error('Tally ने कोई Sales VOUCHER data return नहीं किया।');
     const parsed = parseTallyXml(xmlText, company?.gstin?.slice(0, 2) || supplierStateCode);
