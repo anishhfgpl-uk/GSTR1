@@ -1,10 +1,36 @@
-import { parseTallyXml, TallyXmlParseResult } from './tallyXmlParser';
+import { parseTallyCompanyXml, parseTallyXml, TallyCompanyProfile, TallyXmlParseResult } from './tallyXmlParser';
 
 export interface TallyConnectionStatus {
   success: boolean;
   message: string;
-  source: 'live_tally_port' | 'auto_embedded_tally' | 'failed';
+  source: 'live_tally_port' | 'failed';
   result?: TallyXmlParseResult;
+  company?: TallyCompanyProfile;
+}
+
+async function postJson(path: string, body: unknown = {}) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
+  try {
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload?.message || `Tally proxy returned HTTP ${response.status}`);
+    return payload;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+export async function fetchTallyCompany(): Promise<TallyCompanyProfile> {
+  const payload = await postJson('/api/tally/company');
+  const xml = String(payload?.xml || '');
+  if (!xml) throw new Error('Tally company profile response खाली है।');
+  return parseTallyCompanyXml(xml);
 }
 
 export async function autoFetchFromTally(
@@ -12,33 +38,29 @@ export async function autoFetchFromTally(
   supplierStateCode: string = '27',
 ): Promise<TallyConnectionStatus> {
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-    try {
-      // The public GSTR1 server proxies this request to the local Tally bridge.
-      // The bridge then talks to 127.0.0.1:9000, which is the TallyPrime
-      // instance on the user's PC and therefore the currently-open company.
-      const response = await fetch('/api/tally/sales', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ supplierStateCode }),
-        signal: controller.signal,
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.message || `Tally proxy returned HTTP ${response.status}`);
-      const xmlText = String(payload?.xml || '');
-      if (!xmlText.includes('<VOUCHER')) throw new Error('Tally ने कोई VOUCHER data return नहीं किया।');
-      const parsed = parseTallyXml(xmlText, supplierStateCode);
-      if (!parsed.vouchers.length) throw new Error(parsed.errors[0] || 'Tally से कोई Sales voucher नहीं मिला।');
-      return {
-        success: true,
-        source: 'live_tally_port',
-        message: `Live Tally Prime की currently-open company से ${parsed.vouchers.length} Sales vouchers pick किए गए।`,
-        result: parsed,
-      };
-    } finally {
-      clearTimeout(timeoutId);
+    // Both calls go through the GSTR1 server proxy. The proxy/bridge talks to
+    // 127.0.0.1:9000, so the data comes from the TallyPrime instance currently
+    // running on the user's PC rather than from sample/uploaded data.
+    const [company, salesPayload] = await Promise.all([
+      fetchTallyCompany().catch(() => undefined),
+      postJson('/api/tally/sales', { supplierStateCode }),
+    ]);
+    const xmlText = String(salesPayload?.xml || '');
+    if (!/<VOUCHER\b/i.test(xmlText)) throw new Error('Tally ने कोई Sales VOUCHER data return नहीं किया।');
+    const parsed = parseTallyXml(xmlText, company?.gstin?.slice(0, 2) || supplierStateCode);
+    if (!parsed.vouchers.length) throw new Error(parsed.errors[0] || 'Tally से कोई Sales voucher नहीं मिला।');
+    if (company) {
+      parsed.companyProfile = company;
+      parsed.companyName = company.name || parsed.companyName;
+      parsed.companyGstin = company.gstin || parsed.companyGstin;
     }
+    return {
+      success: true,
+      source: 'live_tally_port',
+      message: `Live TallyPrime की currently-open company से ${parsed.vouchers.length} Sales vouchers और company profile import हुआ।`,
+      result: parsed,
+      company,
+    };
   } catch (err: any) {
     return {
       success: false,
